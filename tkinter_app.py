@@ -1,78 +1,75 @@
-from tkinter import *
 import cv2
-from PIL import Image, ImageTk
 import numpy as np
-import os
 
-recognizer = cv2.face.LBPHFaceRecognizer_create()
-recognizer.read('trainer/trainer.yml')
+import time
+import sys
 
-cascadePath = "Cascades/haarcascade_frontalface_default.xml"
-faceCascade = cv2.CascadeClassifier(cascadePath)
+from ultralytics import YOLO
 
-font = cv2.FONT_HERSHEY_SIMPLEX
 
-id = 0
+CONFIDENCE = 0.5
+font_scale = 1
+thickness = 1
+labels = open("data/coco.names").read().strip().split("\n")
+colors = np.random.randint(0, 255, size=(len(labels), 3), dtype="uint8")
 
-names = ['None', 'Airat', 'Alia', 'Damir', 'Lilya', 'Li']
+model = YOLO("yolov8n.pt")
 
-#------------------------------------------------------------
-
-cam = cv2.VideoCapture(0)
-cam.set(3, 640)
-cam.set(4, 480)
-
-minW = 0.1 * cam.get(3)
-minH = 0.1 * cam.get(4)
-
-app = Tk()
-app.bind('<Escape>', lambda e: app.quit())
-
-label_widget = Label(app)
-label_widget.pack()
-
-def open_camera():
-    _, frame = cam.read()
-
-    opencv_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGBA)
-
-    captured_image = Image.fromarray(opencv_image)
-
-    photo_image = ImageTk.PhotoImage(image=captured_image)
-
-    label_widget.photo_image = photo_image
-    label_widget.configure(image=photo_image)
-    label_widget.after(10, open_camera)
-
+cap = cv2.VideoCapture(0)
+_, image = cap.read()
+h, w = image.shape[:2]
+fourcc = cv2.VideoWriter_fourcc(*"XVID")
+out = cv2.VideoWriter("output.avi", fourcc, 20.0, (w, h))
 while True:
-    ret, img = cam.read()
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    faces = faceCascade.detectMultiScale(gray,scaleFactor=1.2,minNeighbors=5,minSize=(int(minW), int(minH)),    )
+    _, image = cap.read()
 
-    for (x, y, w, h) in faces:
-        cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
-        id, confidence = recognizer.predict(gray[y:y + h, x:x + w])
+    start = time.perf_counter()
+    # run inference on the image
+    # see: https://docs.ultralytics.com/modes/predict/#arguments for full list of arguments
+    results = model.predict(image, conf=CONFIDENCE)[0]
+    time_took = time.perf_counter() - start
+    print("Time took:", time_took)
 
-        if (confidence < 100):
-            id = names[id]
-            confidence = "  {0}%".format(round(100 - confidence))
-        else:
-            id = "unknown"
-            confidence = "  {0}%".format(round(100 - confidence))
+    # loop over the detections
+    for data in results.boxes.data.tolist():
+        # get the bounding box coordinates, confidence, and class id
+        xmin, ymin, xmax, ymax, confidence, class_id = data
+        # converting the coordinates and the class id to integers
+        xmin = int(xmin)
+        ymin = int(ymin)
+        xmax = int(xmax)
+        ymax = int(ymax)
+        class_id = int(class_id)
 
-        cv2.putText(img, str(id), (x + 5, y - 5), font, 1, (255, 255, 255), 2)
-        cv2.putText(img, str(confidence), (x + 5, y + h - 5), font, 1, (255, 255, 0), 1)
+        # draw a bounding box rectangle and label on the image
+        color = [int(c) for c in colors[class_id]]
+        cv2.rectangle(image, (xmin, ymin), (xmax, ymax), color=color, thickness=thickness)
+        text = f"{labels[class_id]}: {confidence:.2f}"
+        # calculate text width & height to draw the transparent boxes as background of the text
+        (text_width, text_height) = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, fontScale=font_scale, thickness=thickness)[0]
+        text_offset_x = xmin
+        text_offset_y = ymin - 5
+        box_coords = ((text_offset_x, text_offset_y), (text_offset_x + text_width + 2, text_offset_y - text_height))
+        overlay = image.copy()
+        cv2.rectangle(overlay, box_coords[0], box_coords[1], color=color, thickness=cv2.FILLED)
+        # add opacity (transparency to the box)
+        image = cv2.addWeighted(overlay, 0.6, image, 0.4, 0)
+        # now put the text (label: confidence %)
+        cv2.putText(image, text, (xmin, ymin - 5), cv2.FONT_HERSHEY_SIMPLEX,
+                    fontScale=font_scale, color=(0, 0, 0), thickness=thickness)
 
-    cv2.imshow('camera', img)
-    k = cv2.waitKey(10) & 0xff
-    if k == 27:
+    # end time to compute the fps
+    end = time.perf_counter()
+    # calculate the frame per second and draw it on the frame
+    fps = f"FPS: {1 / (end - start):.2f}"
+    cv2.putText(image, fps, (50, 50),
+                cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 0), 6)
+    out.write(image)
+    cv2.imshow("image", image)
+
+    if ord("q") == cv2.waitKey(1):
         break
 
-print("\n [INFO] Exiting Program and cleanup stuff")
-cam.release()
+
+cap.release()
 cv2.destroyAllWindows()
-
-button1 = Button(app, text="Open Camera", command=open_camera)
-button1.pack()
-
-app.mainloop()

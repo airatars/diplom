@@ -1,5 +1,6 @@
 import cv2
 import os
+import time
 
 cam = cv2.VideoCapture(0)
 cam.set(3, 640)
@@ -22,6 +23,7 @@ while(True):
         count += 1
         cv2.imwrite("dataset/User." + str(face_id) + '.' + str(count) + ".jpg", gray[y:y+h,x:x+w])
         cv2.imshow('image', img)
+        time.sleep(0.1)
 
     k = cv2.waitKey(100) & 0xff
     if k == 27:
